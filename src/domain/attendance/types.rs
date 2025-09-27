@@ -1,12 +1,14 @@
 use chrono::{DateTime, FixedOffset, NaiveDate};
+use crate::error::{EmployeeIdError};
+use crate::{AttendanceRecordError, TimeError};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmployeeId(String);
 
 impl EmployeeId {
-    pub fn new(value: String) -> Result<Self, String> {
+    pub fn new(value: String) -> Result<Self, EmployeeIdError> {
         if value.is_empty() {
-            return Err("Employee ID cannot be empty".to_string())
+            return Err(EmployeeIdError::Empty);
         }
 
         Ok(EmployeeId(value))
@@ -21,10 +23,10 @@ impl EmployeeId {
 pub struct ClockTime(DateTime<FixedOffset>);
 
 impl ClockTime {
-    pub fn new(timestamp: DateTime<FixedOffset>) -> Result<Self, String> {
+    pub fn new(timestamp: DateTime<FixedOffset>) -> Result<Self, TimeError> {
         let now = chrono::Utc::now().with_timezone(&timestamp.timezone());
         if timestamp > now {
-            return Err("Future timestamp not allowed".to_string());
+            return Err(TimeError::FutureTimeStamp);
         }
 
         Ok(ClockTime(timestamp))
@@ -62,7 +64,7 @@ impl AttendanceRecord {
         work_date: WorkDate,
         clock_in_time: Option<ClockTime>,
         clock_out_time: Option<ClockTime>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, AttendanceRecordError> {
         Ok(AttendanceRecord {
             employee_id,
             work_date,
