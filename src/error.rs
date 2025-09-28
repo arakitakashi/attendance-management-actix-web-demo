@@ -22,6 +22,18 @@ pub enum AttendanceRecordError {
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
+pub enum DatabaseError {
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(String),
+
+    #[error("Query execution failed: {0}")]
+    QueryFailed(String),
+
+    #[error("Serialization failed: {0}")]
+    SerializationFailed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum AttendanceWorkflowError {
     #[error("Employee validation failed: {0}")]
     Employee(#[from] EmployeeIdError),
@@ -31,6 +43,9 @@ pub enum AttendanceWorkflowError {
 
     #[error("Attendance record validation failed: {0}")]
     AttendanceRecord(#[from] AttendanceRecordError),
+
+    #[error("Database operation failed: {0}")]
+    Database(#[from] DatabaseError),
 }
 
 
