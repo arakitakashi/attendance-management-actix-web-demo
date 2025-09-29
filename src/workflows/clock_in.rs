@@ -1,12 +1,13 @@
 use chrono::{DateTime, FixedOffset};
+use sqlx::PgPool;
 use crate::domain::attendance::types::{AttendanceRecord, ClockTime, EmployeeId, WorkDate};
 use crate::{AttendanceWorkflowError};
-use crate::io::database::attendance::{SaveAttendanceRecord};
+use crate::io::database::attendance::save_attendance_record;
 
 #[derive(Debug, Clone)]
 pub struct ClockInCommand {
-    employee_id: String,
-    timestamp: DateTime<FixedOffset>,
+    pub employee_id: String,
+    pub timestamp: DateTime<FixedOffset>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -14,13 +15,13 @@ pub enum ClockInEvent {
     ClockInSucceeded { record: AttendanceRecord },
 }
 
-pub fn execute_clock_in(command: ClockInCommand, save_attendance_record: &SaveAttendanceRecord) -> Result<ClockInEvent, AttendanceWorkflowError> {
+pub async fn execute_clock_in(command: ClockInCommand, pool: &PgPool) -> Result<ClockInEvent, AttendanceWorkflowError> {
     let employee_id = EmployeeId::new(command.employee_id)?;
     let clock_time = ClockTime::new(command.timestamp)?;
     let work_date = WorkDate::from_timestamp(command.timestamp);
     let record = AttendanceRecord::new(employee_id, work_date, Some(clock_time), None)?;
 
-    let saved_record = save_attendance_record(record)?;
+    let saved_record = save_attendance_record(pool, record).await?;
 
     Ok(ClockInEvent::ClockInSucceeded { record: saved_record})
 }
@@ -42,20 +43,21 @@ mod tests {
     async fn test_clock_in_workflow_succeeds_with_valid_command() {
         // Arrange
         let pool = create_test_database_pool().await;
+        let test_id = format!("TEST_{}", uuid::Uuid::new_v4().simple());
+        
         let command = ClockInCommand {
-            employee_id: "ij09080022".to_string(),
+            employee_id: test_id.clone(),
             timestamp: chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap()),
         };
-        let save_fn = crate::io::database::attendance::save_attendance_record(pool.clone());
 
         // Act
-        let result = execute_clock_in(command, &save_fn);
+        let result = execute_clock_in(command, &pool).await;
 
         // Assert
         assert!(result.is_ok());
         match result.unwrap() {
             ClockInEvent::ClockInSucceeded { record } => {
-                assert_eq!(record.employee_id().value(), "ij09080022");
+                assert_eq!(record.employee_id().value(), &test_id);
                 assert!(record.clock_in_time().is_some());
                 assert!(record.clock_out_time().is_none());
             }
@@ -70,10 +72,9 @@ mod tests {
            employee_id: "".to_string(),
            timestamp: chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap()),
        };
-       let save_fn = crate::io::database::attendance::save_attendance_record(pool.clone());
-
+       
        // Act
-       let result = execute_clock_in(command, &save_fn);
+       let result = execute_clock_in(command, &pool).await;
 
        // Assert
        assert!(result.is_err());
@@ -89,23 +90,36 @@ mod tests {
     async fn test_clock_in_workflow_with_persistence_succeeds() {
         // Arrange
         let pool = create_test_database_pool().await;
+        let test_id = format!("TEST_{}", uuid::Uuid::new_v4().simple());
+        // クリーンアップ
+        sqlx::query("DELETE FROM attendance_records WHERE employee_id IN (SELECT id FROM employees WHERE employee_code = $1)")
+            .bind(&test_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
         let command = ClockInCommand {
-            employee_id: "ij09080022".to_string(),
+            employee_id: test_id.clone(),
             timestamp: chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap()),
         };
-        let save_fn = crate::io::database::attendance::save_attendance_record(pool.clone());
 
         // Act
-        let result = execute_clock_in(command, &save_fn);
+        let result = execute_clock_in(command, &pool).await;
 
         // Assert
         assert!(result.is_ok());
         match result.unwrap() {
             ClockInEvent::ClockInSucceeded { record } => {
-                assert_eq!(record.employee_id().value(), "ij09080022");
+                assert_eq!(record.employee_id().value(), &test_id);
                 assert!(record.clock_in_time().is_some());
                 assert!(record.clock_out_time().is_none());
             }
         }
+        // クリーンアップ
+        sqlx::query("DELETE FROM attendance_records WHERE employee_id IN (SELECT id FROM employees WHERE employee_code = $1)")
+            .bind(&test_id)
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 }
